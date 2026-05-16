@@ -108,6 +108,9 @@ projHeme1@sampleColData$ArrowFiles[3] <- "/home/lionavu/projects/def-itobias/BIN
 #Change output file directory in metadata to match with directory on HPC cluster
 projHeme1@projectMetadata@listData$outputDirectory <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/ArchR_subset_1"
 
+#create directory to copy archr subsetted project into, else you will get a recursive error
+#dir.create("/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/ArchR_subset_1", recursive = TRUE)
+
 #create archr subset
 projSubset <- subsetArchRProject(
   ArchRProj = projHeme1,
