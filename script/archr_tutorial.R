@@ -1,3 +1,6 @@
+# tutorial code adapted from link below:
+# https://www.archrproject.com/articles/Articles/tutorial.html
+
 library(ArchR)
 library(parallel)
 #library(BiocManager)
@@ -7,22 +10,23 @@ addArchRLocking(locking = TRUE)
 
 set.seed(1)
 
-#inputFiles <- getTutorialData("Hematopoiesis")
-inputFiles <- c("HemeFragments/scATAC_BMMC_R1.fragments.tsv.gz",
-                "HemeFragments/scATAC_CD34_BMMC_R1.fragments.tsv.gz",
-                "HemeFragments/scATAC_PBMC_R1.fragments.tsv.gz" )
+#Gets tutorial data.
+inputFiles <- getTutorialData("Hematopoiesis")
 
-names(inputFiles) <- c("scATAC_BMMC_R1", "scATAC_CD34_BMMC_R1", "scATAC_PBMC_R1")
-
-head(inputFiles)
-inputFiles_example <- c("/path/to/fragFile1.tsv.gz", "/path/to/fragFile2.tsv.gz")
+# If no internet, run the following instead to get names of input files
+#inputFiles <- c("HemeFragments/scATAC_BMMC_R1.fragments.tsv.gz",
+ #               "HemeFragments/scATAC_CD34_BMMC_R1.fragments.tsv.gz",
+  #              "HemeFragments/scATAC_PBMC_R1.fragments.tsv.gz" )
 
 #adding names to files
-names(inputFiles_example) <- c("Sample1","Sample2")
+#names(inputFiles) <- c("scATAC_BMMC_R1", "scATAC_CD34_BMMC_R1", "scATAC_PBMC_R1")
+
+head(inputFiles)
 
 #Create directory folder to download database R package
 #dir.create("/home/lionavu/projects/def-itobias/BINF_6999/R_libs", recursive = TRUE)
 
+#Install package directly from folder
 #install.packages("/home/lionavu/projects/def-itobias/BINF_6999/BSgenome.Hsapiens.UCSC.hg19_1.4.3.tar.gz",
 #               lib = "/home/lionavu/projects/def-itobias/BINF_6999/R_libs",
 #               repos = NULL,
@@ -32,7 +36,7 @@ names(inputFiles_example) <- c("Sample1","Sample2")
 library(BSgenome.Hsapiens.UCSC.hg19,
         lib.loc = "/home/lionavu/projects/def-itobias/BINF_6999/R_libs")
 
-## Setting default genome to Hg19
+## Setting default genome to Hg19, for some reason, it did not work without downloading the file above
 addArchRGenome("hg19")
 
 #Set parallel threads to capability to 16
@@ -47,12 +51,70 @@ ArrowFiles <- createArrowFiles(
   addTileMat = TRUE,
   addGeneScoreMat = TRUE)
 
+# Line of code here prevents parallelization issues by setting thread to 1
 addArchRThreads(threads = 1)
 
-#Identify doublets in data 
+#Identify doublets in data, following had to be run on the rstudio server to work, HPC did not work...
 doubScores <- addDoubletScores(
     input = ArrowFiles,
     k = 10, #Refers to how many cells near a "pseudo-doublet" to count.
     knnMethod = "UMAP", #Refers to the embedding to use for nearest neighbor search with doublet projection.
     LSIMethod = 1)
+
+#Create arrow project
+projHeme1 <- ArchRProject(
+  ArrowFiles = ArrowFiles, 
+  outputDirectory = "HemeTutorial",
+  copyArrows = TRUE)
+
+#save the following to transfer file to HPC
+saveRDS(projHeme1, file = "projHeme1.RDS", compress = FALSE)
+
+#Run the following line on HPC
+projHeme1 <- readRDS("projHeme1.RDS")
+
+#Look at contents of ArchR project
+projHeme1
+
+#look at memory size of project
+paste0("Memory Size = ", round(object.size(projHeme1) / 10^6, 3), " MB")
+#[1] "Memory Size = 37.477 MB"
+
+#Check which data matrices are available in ArchR project
+getAvailableMatrices(projHeme1)
+
+#Look at all metadata in cellColData available 
+head(projHeme1@cellColData)
+
+#Access cellColData by using the $ or the @ operator
+head(projHeme1@cellNames)
+head(projHeme1@cellColData@rownames)
+
+#Access sample names by using the $ operator
+head(projHeme1$Sample)
+
+# Access the TSS Enrichment Scores for each cell
+head(projHeme1$TSSEnrichment)
+quantile(projHeme1$TSSEnrichment)
+
+#Change arrow file directory in metadata
+projHeme1@sampleColData$ArrowFiles[1] <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/scATAC_BMMC_R1.arrow" 
+projHeme1@sampleColData$ArrowFiles[2] <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/scATAC_CD34_BMMC_R1.arrow"
+projHeme1@sampleColData$ArrowFiles[3] <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/scATAC_PBMC_R1.arrow"
+
+#Change output file directory in metadata
+projHeme1@projectMetadata@listData$outputDirectory <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/ArchR_subset_1"
+
+#create archr subset
+projSubset <- subsetArchRProject(
+  ArchRProj = projHeme1,
+  cells = projHeme1$cellNames[idxSample],
+  outputDirectory = "ArchRSubset",
+  dropCells = TRUE,
+  force = TRUE)
+
+projHeme1[1:100, ]
+
+projHeme1[projHeme1$cellNames[1:100], ]
+
 
