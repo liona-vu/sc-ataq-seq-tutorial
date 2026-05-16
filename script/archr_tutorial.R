@@ -97,12 +97,15 @@ head(projHeme1$Sample)
 head(projHeme1$TSSEnrichment)
 quantile(projHeme1$TSSEnrichment)
 
-#Change arrow file directory in metadata
+getArrowFiles(projHeme1)
+#directory of arrow files are outdated and is from the R server, must change to match to HPC directories
+
+#Change arrow file directory in metadata to match with directory on HPC cluster
 projHeme1@sampleColData$ArrowFiles[1] <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/scATAC_BMMC_R1.arrow" 
 projHeme1@sampleColData$ArrowFiles[2] <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/scATAC_CD34_BMMC_R1.arrow"
 projHeme1@sampleColData$ArrowFiles[3] <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/scATAC_PBMC_R1.arrow"
 
-#Change output file directory in metadata
+#Change output file directory in metadata to match with directory on HPC cluster
 projHeme1@projectMetadata@listData$outputDirectory <- "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/ArchR_subset_1"
 
 #create archr subset
