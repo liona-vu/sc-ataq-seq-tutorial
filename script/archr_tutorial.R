@@ -203,6 +203,11 @@ length(getCellNames(ArchRProj = projHeme2))
 #[1] 10250
 
 #perform iterative LSI for dimensionality reduction, ensure threads = 1!!!!! HPC with apptainer again did not work, but worked on Rserver
+#may be an issue with fortran which irbla relies on and is breaking the lsi computation along with the open blast system that apptainer runs on
+#setting this to 1 thread in R may help
+#RhpcBLASctl::blas_set_num_threads(1)
+#RhpcBLASctl::omp_set_num_threads(1)
+
 projHeme2 <- addIterativeLSI(
     ArchRProj = projHeme2,
     useMatrix = "TileMatrix", 
@@ -317,10 +322,163 @@ projHeme2 <- addUMAP(
     metric = "cosine"
 )
 
+#identify marker features
+markerList <- getMarkers(markersGS, cutOff = "FDR <= 0.01 & Log2FC >= 1.25")
+
+#visualize markers
+markerGenes  <- c(
+    "CD34", #Early Progenitor
+    "GATA1", #Erythroid
+    "PAX5", "MS4A1", "EBF1", "MME", #B-Cell Trajectory
+    "CD14", "CEBPB", "MPO", #Monocytes
+    "IRF8", 
+    "CD3D", "CD8A", "TBX21", "IL7R" #TCells )
+	
+heatmapGS <- plotMarkerHeatmap(
+  seMarker = markersGS, 
+  cutOff = "FDR <= 0.01 & Log2FC >= 1.25", 
+  labelMarkers = markerGenes,
+  transpose = TRUE)
+
+#plot heatmap
+ComplexHeatmap::draw(heatmapGS, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+heatmapGS@row_order <- c(10,11,12,3,4,5,1,2,6,8,7,9)
+ComplexHeatmap::draw(heatmapGS, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+plotPDF(heatmapGS, name = "GeneScores-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme2, addDOC = FALSE)
+
+markerGenes  <- c(
+    "CD34",  #Early Progenitor
+    "GATA1", #Erythroid
+    "PAX5", "MS4A1", "MME", #B-Cell Trajectory
+    "CD14", "MPO", #Monocytes
+    "CD3D", "CD8A"#TCells
+  )
+
+p <- plotEmbedding(
+    ArchRProj = projHeme2, 
+    colorBy = "GeneScoreMatrix", 
+    name = markerGenes, 
+    embedding = "UMAP",
+    quantCut = c(0.01, 0.95),
+    imputeWeights = NULL)
+
+p2 <- lapply(p, function(x){
+    x + guides(color = FALSE, fill = FALSE) + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+do.call(cowplot::plot_grid, c(list(ncol = 3),p2))
+
+plotPDF(plotList = p, 
+    name = "Plot-UMAP-Marker-Genes-WO-Imputation.pdf", 
+    ArchRProj = projHeme2, 
+    addDOC = FALSE, width = 5, height = 5)
+
+p <- plotEmbedding(
+    ArchRProj = projHeme2, 
+    colorBy = "GeneScoreMatrix", 
+    name = markerGenes, 
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(projHeme2))
+
+#Rearrange for grid plotting
+p2 <- lapply(p, function(x){
+    x + guides(color = FALSE, fill = FALSE) + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+do.call(cowplot::plot_grid, c(list(ncol = 3),p2))
+
+#Add module scores
+features <- list(
+  BScore = c("MS4A1", "CD79A", "CD74"),
+  TScore = c("CD3D", "CD8A", "GZMB", "CCR7", "LEF1"))
+	
+projHeme2 <- addModuleScore(projHeme2,
+    useMatrix = "GeneScoreMatrix",
+    name = "Module",
+    features = features)
+
+p5 <- plotEmbedding(projHeme2,
+    embedding = "UMAP",
+    colorBy = "cellColData",
+    name="Module.BScore",
+    imputeWeights = getImputeWeights(projHeme2))
+
+p6 <- plotEmbedding(projHeme2,
+    embedding = "UMAP",
+    colorBy = "cellColData",
+    name="Module.TScore",
+    imputeWeights = getImputeWeights(projHeme2))
+
+plotPDF(ggAlignPlots(p5,p6,draw=F,type="h"))
+
+#Track Plotting with ArchRBrowser
+set.seed(1)
+plot_browser <- plotBrowserTrack(
+    ArchRProj = projHeme2, 
+    groupBy = "Clusters", 
+    geneSymbol = markerGenes, 
+    upstream = 50000,
+    downstream = 50000)
+
+#plot the actual track 
+grid::grid.newpage()
+grid::grid.draw(p$CD14)
+
+#save a multi-page PDF with a single page for each gene locus 
+plotPDF(plotList = p, 
+    name = "Plot-Tracks-Marker-Genes.pdf", 
+    ArchRProj = projHeme2, 
+    addDOC = FALSE, width = 5, height = 5)
+
+#Defining clusters with scRNA seq data
+#run wget https://jeffgranja.s3.amazonaws.com/ArchR/TestData/scRNA-Hematopoiesis-Granja-2019.rds on terminal beforehand
+	
+seRNA <- readRDS("scRNA-Hematopoiesis-Granja-2019.rds")
+seRNA
+
+#eda of scrna seq data
+colnames(colData(seRNA))
+table(colData(seRNA)$BioClassification)
+	
+#perform unconstrained integration of scrna seq data with scataq seq data
+projHeme2 <- addGeneIntegrationMatrix(
+    ArchRProj = projHeme2, 
+    useMatrix = "GeneScoreMatrix",
+    matrixName = "GeneIntegrationMatrix",
+    reducedDims = "IterativeLSI",
+    seRNA = seRNA,
+    addToArrow = FALSE,
+    groupRNA = "BioClassification",
+    nameCell = "predictedCell_Un",
+    nameGroup = "predictedGroup_Un",
+    nameScore = "predictedScore_Un")
+
+pal <- paletteDiscrete(values = colData(seRNA)$BioClassification)
 
 
 
 
 
+
+
+
+
+
+
+	
 
 
