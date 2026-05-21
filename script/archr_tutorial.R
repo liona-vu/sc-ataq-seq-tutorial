@@ -453,8 +453,11 @@ seRNA
 #eda of scrna seq data
 colnames(colData(seRNA))
 table(colData(seRNA)$BioClassification)
-	
-#perform unconstrained integration of scrna seq data with scataq seq data
+projHeme2 <- loadArchRProject(path = "./Save-ProjHeme1-step-10")
+seRNA <- readRDS("scRNA-Hematopoiesis-Granja-2019.rds")
+seRNA
+
+#generating an unconstrained integration, works on Rstudio server with docker image but not in HPC
 projHeme2 <- addGeneIntegrationMatrix(
     ArchRProj = projHeme2, 
     useMatrix = "GeneScoreMatrix",
@@ -467,9 +470,231 @@ projHeme2 <- addGeneIntegrationMatrix(
     nameGroup = "predictedGroup_Un",
     nameScore = "predictedScore_Un")
 
+#check if gene score matrix was added
+getAvailableMatrices(projHeme2)
+
+#performing constrained integration
+cM <- as.matrix(confusionMatrix(projHeme2$Clusters, projHeme2$predictedGroup_Un))
+preClust <- colnames(cM)[apply(cM, 1 , which.max)]
+cbind(preClust, rownames(cM)) #Assignments
+
+# look at the cell type labels from our scRNA-seq data 
+unique(unique(projHeme2$predictedGroup_Un))
+
+#From scRNA
+cTNK <- paste0(paste0(19:25), collapse="|")
+cTNK
+
+cNonTNK <- paste0(c(paste0("0", 1:9), 10:13, 15:18), collapse="|")
+cNonTNK
+
+# For T cells and NK cells clusters
+clustTNK <- rownames(cM)[grep(cTNK, preClust)]
+clustTNK
+
+#identifies non T and non NK cells
+clustNonTNK <- rownames(cM)[grep(cNonTNK, preClust)]
+clustNonTNK
+
+#identify T and NK cells in RNA seq data
+rnaTNK <- colnames(seRNA)[grep(cTNK, colData(seRNA)$BioClassification)]
+head(rnaTNK)
+
+#identify the Non-T cell Non-NK cell
+rnaNonTNK <- colnames(seRNA)[grep(cNonTNK, colData(seRNA)$BioClassification)]
+head(rnaNonTNK)
+
+#nested list for constrained integration
+groupList <- SimpleList(
+    TNK = SimpleList(
+        ATAC = projHeme2$cellNames[projHeme2$Clusters %in% clustTNK],
+        RNA = rnaTNK),
+    NonTNK = SimpleList(
+        ATAC = projHeme2$cellNames[projHeme2$Clusters %in% clustNonTNK],
+        RNA = rnaNonTNK))
+
+#perform constrained integration
+projHeme2 <- addGeneIntegrationMatrix(
+    ArchRProj = projHeme2, 
+    useMatrix = "GeneScoreMatrix",
+    matrixName = "GeneIntegrationMatrix",
+    reducedDims = "IterativeLSI",
+    seRNA = seRNA,
+    addToArrow = FALSE, 
+    groupList = groupList,
+    groupRNA = "BioClassification",
+    nameCell = "predictedCell_Co",
+    nameGroup = "predictedGroup_Co",
+    nameScore = "predictedScore_Co")
+
+#compare both constrained and unconstrained integration
 pal <- paletteDiscrete(values = colData(seRNA)$BioClassification)
+pal
 
+#plot 
+p1 <- plotEmbedding(
+    projHeme2, 
+    colorBy = "cellColData", 
+    name = "predictedGroup_Un", 
+    pal = pal)
 
+p2 <- plotEmbedding(
+    projHeme2, 
+    colorBy = "cellColData", 
+    name = "predictedGroup_Co", 
+    pal = pal)
+
+#save plot
+plotPDF(p1,p2, name = "Plot-UMAP-RNA-Integration.pdf", ArchRProj = projHeme2, addDOC = FALSE, width = 5, height = 5)
+
+#projHeme2 <- saveArchRProject(ArchRProj = projHeme2, outputDirectory = "Save-ProjHeme2-step-10-1", load = TRUE)
+#projHeme2 <- loadArchRProject(path = "./Save-ProjHeme2-step-10-1")
+
+#Adding Pseudo-scRNA-seq profiles for each scATAC-seq cell, this can be computationally demanding! works on server but not on HPC apptainer
+projHeme3 <- addGeneIntegrationMatrix(
+    ArchRProj = projHeme2, 
+    useMatrix = "GeneScoreMatrix",
+    matrixName = "GeneIntegrationMatrix",
+    reducedDims = "IterativeLSI",
+    seRNA = seRNA,
+    addToArrow = TRUE,
+    force= TRUE,
+    groupList = groupList,
+    groupRNA = "BioClassification",
+    nameCell = "predictedCell",
+    nameGroup = "predictedGroup",
+    nameScore = "predictedScore")
+
+getAvailableMatrices(projHeme3)
+
+saveArchRProject(ArchRProj = projHeme3, outputDirectory = "Save-ProjHeme2-step-10-1.1", load = TRUE)
+
+#added impute weights to our project
+projHeme3 <- addImputeWeights(projHeme3)
+
+#gene expression UMAP overlay, defining cell types
+markerGenes  <- c(
+    "CD34", #Early Progenitor
+    "GATA1", #Erythroid
+    "PAX5", "MS4A1", #B-Cell Trajectory
+    "CD14", #Monocytes
+    "CD3D", "CD8A", "TBX21", "IL7R") #TCells
+
+p1 <- plotEmbedding(
+    ArchRProj = projHeme3, 
+    colorBy = "GeneIntegrationMatrix", 
+    name = markerGenes, 
+    continuousSet = "horizonExtra",
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(projHeme3))
+
+#now with the gene score
+p2 <- plotEmbedding(
+    ArchRProj = projHeme3, 
+    colorBy = "GeneScoreMatrix", 
+    continuousSet = "horizonExtra",
+    name = markerGenes, 
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(projHeme3))
+
+#plot all marker genes
+p1c <- lapply(p1, function(x){
+    x + guides(color = FALSE, fill = FALSE) + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+
+p2c <- lapply(p2, function(x){
+    x + guides(color = FALSE, fill = FALSE) + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+	
+#show all plots for gene score and gene expression
+do.call(cowplot::plot_grid, c(list(ncol = 3), p1c))
+do.call(cowplot::plot_grid, c(list(ncol = 3), p2c))
+
+#save plots
+plotPDF(plotList = p1, 
+    name = "Plot-UMAP-Marker-Genes-RNA-W-Imputation.pdf", 
+    ArchRProj = projHeme3, 
+    addDOC = FALSE, width = 5, height = 5)
+
+saveArchRProject(ArchRProj = projHeme3, outputDirectory = "./Save-ProjHeme2-step-10-2", load = TRUE)
+
+cM <- confusionMatrix(projHeme3$Clusters, projHeme3$predictedGroup)
+labelOld <- rownames(cM)
+
+labelNew <- colnames(cM)[apply(cM, 1, which.max)]
+
+remapClust <- c(
+    "01_HSC" = "Progenitor",
+    "02_Early.Eryth" = "Erythroid",
+    "03_Late.Eryth" = "Erythroid",
+    "04_Early.Baso" = "Basophil",
+    "05_CMP.LMPP" = "Progenitor",
+    "06_CLP.1" = "CLP",
+    "07_GMP" = "GMP",
+    "08_GMP.Neut" = "GMP",
+    "09_pDC" = "pDC",
+    "10_cDC" = "cDC",
+    "11_CD14.Mono.1" = "Mono",
+    "12_CD14.Mono.2" = "Mono",
+    "13_CD16.Mono" = "Mono",
+    "15_CLP.2" = "CLP",
+    "16_Pre.B" = "PreB",
+    "17_B" = "B",
+    "18_Plasma" = "Plasma",
+    "19_CD8.N" = "CD8.N",
+    "20_CD4.N1" = "CD4.N",
+    "21_CD4.N2" = "CD4.N",
+    "22_CD4.M" = "CD4.M",
+    "23_CD8.EM" = "CD8.EM",
+    "24_CD8.CM" = "CD8.CM",
+    "25_NK" = "NK")
+	
+remapClust <- remapClust[names(remapClust) %in% labelNew]
+
+labelNew2 <- mapLabels(labelNew, oldLabels = names(remapClust), newLabels = remapClust)
+projHeme3$Clusters2 <- mapLabels(projHeme3$Clusters, newLabels = labelNew2, oldLabels = labelOld)
+
+p1 <- plotEmbedding(projHeme3, colorBy = "cellColData", name = "Clusters2")
+projHeme3 <- saveArchRProject(ArchRProj = projHeme3, outputDirectory = "Save-ProjHeme3", load = TRUE)
+
+#making pseudo bulk replicaatesm this takes a loong time
+projHeme4 <- addGroupCoverages(ArchRProj = projHeme3, groupBy = "Clusters2")
+
+groups <- addGroupCoverages(ArchRProj = projHeme3, groupBy = "Clusters2", returnGroups = TRUE)
+
+#saveArchRProject(ArchRProj = projHeme4, outputDirectory = "Save-ProjHeme2-step-11-2", load = TRUE)
+	
+#projHeme4 <- loadArchRProject(path = "/.Save-ProjHeme2-step-11-2", load =TRUE)
+							  
+#now to calling peaks with macs2
+#run pip install macs2 first on terminal!
+#make sure to load the genome beforehand! else r will complain ...
+
+#find macs directory
+pathToMacs2 <- findMacs2()
+#Searching For MACS2..
+#Found with $PATH at /usr/local/bin/macs2
+	
+projHeme4 <- addReproduciblePeakSet(
+    ArchRProj = projHeme4, 
+    groupBy = "Clusters2", 
+    pathToMacs2 = pathToMacs2)
 
 
 
