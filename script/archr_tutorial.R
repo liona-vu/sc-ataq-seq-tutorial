@@ -696,6 +696,215 @@ projHeme4 <- addReproduciblePeakSet(
     groupBy = "Clusters2", 
     pathToMacs2 = pathToMacs2)
 
+#check list of files from peak calling
+list.files(path=paste0(getOutputDirectory(ArchRProj = projHeme4),"/PeakCalls"))
+
+#look at peak set
+getPeakSet(projHeme4)
+
+#save archr project
+projHeme4 <- saveArchRProject(ArchRProj = projHeme4, outputDirectory = "Save-ProjHeme4-step-12.2", load = TRUE)
+
+#add peak matrix to project
+projHeme5 <- addPeakMatrix(projHeme4)
+
+#look at the peaks we have for each cell type
+table(projHeme5$Clusters2)
+
+#identify marker peaks
+markerPeaks <- getMarkerFeatures(
+    ArchRProj = projHeme5, 
+    useMatrix = "PeakMatrix", 
+    groupBy = "Clusters2",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  testMethod = "wilcoxon")
+
+#look at marker peaks
+markerPeaks
+
+#retrieve marker list of peaks of interest
+markerList <- getMarkers(markerPeaks, cutOff = "FDR <= 0.01 & Log2FC >= 1")
+markerList
+
+#look at marker peaks for a certain cell type for example
+markerList$Erythroid
+
+#repeat get makers function but seeting GR range to true
+markerList <- getMarkers(markerPeaks, cutOff = "FDR <= 0.01 & Log2FC >= 1", returnGR = TRUE)
+markerList
+markerList$Erythroid
+
+#plotting marker peaks in ArchR
+heatmapPeaks <- markerHeatmap(
+  seMarker = markerPeaks, 
+  cutOff = "FDR <= 0.1 & Log2FC >= 0.5",
+  transpose = TRUE)
+
+#plot heatmap
+draw(heatmapPeaks, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+#save heatmap
+plotPDF(heatmapPeaks, name = "Peak-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme5, addDOC = FALSE)
+
+#generate marker volcano plots and MA plots
+pma <- plotMarkers(seMarker = markerPeaks, name = "Erythroid", cutOff = "FDR <= 0.1 & Log2FC >= 1", plotAs = "MA")
+pma
+
+pv <- plotMarkers(seMarker = markerPeaks, name = "Erythroid", cutOff = "FDR <= 0.1 & Log2FC >= 1", plotAs = "Volcano")
+pv
+
+#save plots
+plotPDF(pma, pv, name = "Erythroid-Markers-MA-Volcano", width = 5, height = 5, ArchRProj = projHeme5, addDOC = FALSE)
+
+#plot browser tracks of marker peaks
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5, 
+    groupBy = "Clusters2", 
+    geneSymbol = c("GATA1"),
+    features =  getMarkers(markerPeaks, cutOff = "FDR <= 0.1 & Log2FC >= 1", returnGR = TRUE)["Erythroid"],
+    upstream = 50000,
+    downstream = 50000)
+
+grid::grid.newpage()
+grid::grid.draw(p$GATA1)
+
+#save browser tracks
+plotPDF(p, name = "Plot-Tracks-With-Features", width = 5, height = 5, ArchRProj = projHeme5, addDOC = FALSE)
+
+#perform pairwise testing between two cell groups, can be any groups, here we use erythroid and progenitor
+markerTest <- getMarkerFeatures(
+  ArchRProj = projHeme5, 
+  useMatrix = "PeakMatrix",
+  groupBy = "Clusters2",
+  testMethod = "wilcoxon",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  useGroups = "Erythroid",
+  bgdGroups = "Progenitor")
+
+#plot volcano plots of pairwise testing
+pma <- plotMarkers(seMarker = markerTest, name = "Erythroid", cutOff = "FDR <= 0.1 & abs(Log2FC) >= 1", plotAs = "MA")
+pma
+
+pv <- plotMarkers(seMarker = markerTest, name = "Erythroid", cutOff = "FDR <= 0.1 & abs(Log2FC) >= 1", plotAs = "Volcano")
+pv
+
+plotPDF(pma, pv, name = "Erythroid-vs-Progenitor-Markers-MA-Volcano", width = 5, height = 5, ArchRProj = projHeme5, addDOC = FALSE)
+
+#add motif enrichment, MAKE sure you have the genome annotation library loaded!!!
+projHeme5 <- addMotifAnnotations(ArchRProj = projHeme5, motifSet = "cisbp", name = "Motif")
+
+#looks at what motifs are present in each peak
+pSet <- getPeakSet(ArchRProj = projHeme5)
+pSet$name <- paste(seqnames(pSet), start(pSet), end(pSet), sep = "_")
+matches <- getMatches(ArchRProj = projHeme5, name = "Motif")
+rownames(matches) <- paste(seqnames(matches), start(matches), end(matches), sep = "_")
+matches <- matches[pSet$name]
+
+#mathcing to the CEPBA promoter
+gr <- GRanges(seqnames = c("chr19"), ranges = IRanges(start = c(33792929), end = c(33794030)))
+
+#find the motifs 
+queryHits <- queryHits(findOverlaps(query = pSet, subject = gr, type = "within"))
+
+#check what motifs are present
+colnames(matches)[which(assay(matches[queryHits,]))]
+
+#looking at which motids are present in differentiall expression
+motifsUp <- peakAnnoEnrichment(
+    seMarker = markerTest,
+    ArchRProj = projHeme5,
+    peakAnnotation = "Motif",
+    cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+
+motifsUp
+#create dataframe with motif name, p value, and the rank
+df <- data.frame(TF = rownames(motifsUp), mlog10Padj = assay(motifsUp)[,1])
+df <- df[order(df$mlog10Padj, decreasing = TRUE),]
+df$rank <- seq_len(nrow(df))
+
+#check out the motifs
+head(df)
+
+#plot the top motifs
+ggUp <- ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +
+  ggrepel::geom_label_repel(
+        data = df[rev(seq_len(30)), ], aes(x = rank, y = mlog10Padj, label = TF), 
+        size = 1.5,
+        nudge_x = 2,
+        color = "black"
+  ) + theme_ArchR() + 
+  ylab("-log10(P-adj) Motif Enrichment") + 
+  xlab("Rank Sorted TFs Enriched") +
+  scale_color_gradientn(colors = paletteContinuous(set = "comet"))
+
+motifsDo <- peakAnnoEnrichment(
+    seMarker = markerTest,
+    ArchRProj = projHeme5,
+    peakAnnotation = "Motif",
+    cutOff = "FDR <= 0.1 & Log2FC <= -0.5")
+
+df <- data.frame(TF = rownames(motifsDo), mlog10Padj = assay(motifsDo)[,1])
+df <- df[order(df$mlog10Padj, decreasing = TRUE),]
+df$rank <- seq_len(nrow(df))
+
+#plot the top motifs
+ggDo <- ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +
+  ggrepel::geom_label_repel(
+        data = df[rev(seq_len(30)), ], aes(x = rank, y = mlog10Padj, label = TF), 
+        size = 1.5,
+        nudge_x = 2,
+        color = "black"
+  ) + theme_ArchR() + 
+  ylab("-log10(FDR) Motif Enrichment") +
+  xlab("Rank Sorted TFs Enriched") +
+  scale_color_gradientn(colors = paletteContinuous(set = "comet"))
+
+plotPDF(ggUp, ggDo, name = "Erythroid-vs-Progenitor-Markers-Motifs-Enriched", width = 5, height = 5, ArchRProj = projHeme5, addDOC = FALSE)
+
+#motif enrichment of the peaks identified
+enrichMotifs <- peakAnnoEnrichment(
+    seMarker = markerPeaks,
+    ArchRProj = projHeme5,
+    peakAnnotation = "Motif",
+    cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+
+#plot a heatmap and save
+heatmapEM <- plotEnrichHeatmap(enrichMotifs, n = 7, transpose = TRUE)
+ComplexHeatmap::draw(heatmapEM, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+plotPDF(heatmapEM, name = "Motifs-Enriched-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme5, addDOC = FALSE)
+
+#motif logos identification
+pwm <- getPeakAnnotation(projHeme5, "Motif")$motifs[["SOX6_868"]]
+pwm
+
+PWMatrixToProbMatrix <- function(x){
+  if (class(x) != "PWMatrix") stop("x must be a TFBSTools::PWMatrix object")
+  m <- (exp(as(x, "matrix"))) * TFBSTools::bg(x)/sum(TFBSTools::bg(x))
+  m <- t(t(m)/colSums(m))
+  m
+}
+
+ppm <- PWMatrixToProbMatrix(pwm)
+ppm
+
+#install.packages("/home/lionavu/projects/def-itobias/BINF_6999/R_libs/ggseqlogo_0.2.2.tar.gz", 
+#				 repos = NULL, 
+	#			 type = "source", lib = "/home/lionavu/projects/def-itobias/BINF_6999/R_libs")
+
+library(ggseqlogo, lib.loc = "/home/lionavu/projects/def-itobias/BINF_6999/R_libs")
+ggseqlogo(ppm, method = "bits")
+g1 <- ggseqlogo(ppm, method = "bits")
+g2 <- ggseqlogo(ppm, method = "prob")
+
+#Save motif logo
+plotPDF(g1, g2, name = "Motif-Logos", width = 8, height = 6, ArchRProj = projHeme5, addDOC= FALSE)
+
+
+#run wget https://jeffgranja.s3.amazonaws.com/ArchR/Annotations/ArchR-Hg19-v1.Anno first!
+  
+projHeme5 <- addArchRAnnotations(ArchRProj = projHeme5, collection = "EncodeTFBS", db = "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/ArchR-Hg19-v1.Anno")
 
 
 
@@ -704,6 +913,5 @@ projHeme4 <- addReproduciblePeakSet(
 
 
 
-	
 
-
+  
