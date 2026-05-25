@@ -903,9 +903,251 @@ plotPDF(g1, g2, name = "Motif-Logos", width = 8, height = 6, ArchRProj = projHem
 
 
 #run wget https://jeffgranja.s3.amazonaws.com/ArchR/Annotations/ArchR-Hg19-v1.Anno first!
-  
+#perform archr enrichment  
 projHeme5 <- addArchRAnnotations(ArchRProj = projHeme5, collection = "EncodeTFBS", db = "/home/lionavu/projects/def-itobias/BINF_6999/archr_tutorial/ArchR-Hg19-v1.Anno")
 
+#test for enrichment of these ENCODE TFBSs 
+enrichEncode <- peakAnnoEnrichment(
+    seMarker = markerPeaks,
+    ArchRProj = projHeme5,
+    peakAnnotation = "EncodeTFBS",
+    cutOff = "FDR <= 0.1 & Log2FC >= 0.5"
+  )
+
+enrichEncode #summarized experiment
+
+#plot heatmap
+heatmapEncode <- plotEnrichHeatmap(enrichEncode, n = 7, transpose = TRUE)
+ComplexHeatmap::draw(heatmapEncode, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+	
+#save 
+plotPDF(heatmapEncode, name = "EncodeTFBS-Enriched-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme5, addDOC = FALSE)
+
+#for bulk atac seq
+projHeme5 <- addArchRAnnotations(ArchRProj = projHeme5, collection = "ATAC")
+enrichATAC <- peakAnnoEnrichment(
+    seMarker = markerPeaks,
+    ArchRProj = projHeme5,
+    peakAnnotation = "ATAC",
+    cutOff = "FDR <= 0.1 & Log2FC >= 0.5"
+  )
+	
+heatmapATAC <- plotEnrichHeatmap(enrichATAC, n = 7, transpose = TRUE)
+ComplexHeatmap::draw(heatmapATAC, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+plotPDF(heatmapATAC, name = "ATAC-Enriched-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme5, addDOC = FALSE)
+
+#for codex
+projHeme5 <- addArchRAnnotations(ArchRProj = projHeme5, collection = "Codex")
+enrichCodex <- peakAnnoEnrichment(
+    seMarker = markerPeaks,
+    ArchRProj = projHeme5,
+    peakAnnotation = "Codex",
+    cutOff = "FDR <= 0.1 & Log2FC >= 0.5")
+
+#plot heatmap
+heatmapCodex <- plotEnrichHeatmap(enrichCodex, n = 7, transpose = TRUE)
+ComplexHeatmap::draw(heatmapCodex, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+plotPDF(heatmapCodex, name = "Codex-Enriched-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme5, addDOC = FALSE)
+
+#chromVAR deviations
+#add motif annotations to project
+if("Motif" %ni% names(projHeme5@peakAnnotation)){
+    projHeme5 <- addMotifAnnotations(ArchRProj = projHeme5, motifSet = "cisbp", name = "Motif")
+}
+
+projHeme5 <- addBgdPeaks(projHeme5)
+
+projHeme5 <- addDeviationsMatrix(
+  ArchRProj = projHeme5, 
+  peakAnnotation = "Motif",
+  force = TRUE)
+
+#plot and save deviation dot plot
+plotVarDev <- getVarDeviations(projHeme5, name = "MotifMatrix", plot = TRUE)
+plotPDF(plotVarDev, name = "Variable-Motif-Deviation-Scores", width = 5, height = 5, ArchRProj = projHeme5, addDOC = FALSE)
+
+#only looking at small subset of TF
+motifs <- c("GATA1", "CEBPA", "EBF1", "IRF4", "TBX21", "PAX5")
+markerMotifs <- getFeatures(projHeme5, select = paste(motifs, collapse="|"), useMatrix = "MotifMatrix")
+markerMotifs
+
+markerMotifs <- grep("z:", markerMotifs, value = TRUE)
+markerMotifs <- markerMotifs[markerMotifs %ni% "z:SREBF1_22"]
+markerMotifs
+
+p <- plotGroups(ArchRProj = projHeme5, 
+  groupBy = "Clusters2", 
+  colorBy = "MotifMatrix", 
+  name = markerMotifs,
+  imputeWeights = getImputeWeights(projHeme5))
+
+#plot all TF for each cell type
+p2 <- lapply(seq_along(p), function(x){
+  if(x != 1){
+    p[[x]] + guides(color = "none", fill = "none") + 
+    theme_ArchR(baseSize = 6) +
+    theme(plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")) +
+    theme(
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank(),
+        axis.title.y=element_blank()
+    ) + ylab("")
+  }else{
+    p[[x]] + guides(color = "none", fill = "none") + 
+    theme_ArchR(baseSize = 6) +
+    theme(plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")) +
+    theme(
+        axis.ticks.y=element_blank(),
+        axis.title.y=element_blank()
+    ) + ylab("")
+  }
+})
+
+#save
+do.call(cowplot::plot_grid, c(list(nrow = 1, rel_widths = c(2, rep(1, length(p2) - 1))),p2))
+plotPDF(p, name = "Plot-Groups-Deviations-w-Imputation", width = 5, height = 5, ArchRProj = projHeme5, addDOC = FALSE)
+
+#overlay the z scores on the embedding
+p <- plotEmbedding(
+    ArchRProj = projHeme5, 
+    colorBy = "MotifMatrix", 
+    name = sort(markerMotifs), 
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(projHeme5))
+
+#plot UMAP	
+p2 <- lapply(p, function(x){
+    x + guides(color = "none", fill = "none") + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+do.call(cowplot::plot_grid, c(list(ncol = 3),p2))
+
+#overlay scores on the UMAP embedding
+markerGS <- getFeatures(projHeme5, select = paste(motifs, collapse="|"), useMatrix = "GeneScoreMatrix")
+markerGS <- markerGS[markerGS %ni% c("SREBF1","CEBPA-DT")]
+markerGS
+
+p <- plotEmbedding(
+    ArchRProj = projHeme5, 
+    colorBy = "GeneScoreMatrix", 
+    name = sort(markerGS), 
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(projHeme5))
+
+p2 <- lapply(p, function(x){
+    x + guides(color = "none", fill = "none") + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+do.call(cowplot::plot_grid, c(list(ncol = 3),p2))
+
+#plot the linked gene expression for each of these TFs
+markerRNA <- getFeatures(projHeme5, select = paste(motifs, collapse="|"), useMatrix = "GeneIntegrationMatrix")
+markerRNA <- markerRNA[markerRNA %ni% c("SREBF1","CEBPA-DT")]
+markerRNA
+
+p <- plotEmbedding(
+    ArchRProj = projHeme5, 
+    colorBy = "GeneIntegrationMatrix", 
+    name = sort(markerRNA), 
+    embedding = "UMAP",
+    continuousSet = "blueYellow",
+    imputeWeights = getImputeWeights(projHeme5))
+
+p2 <- lapply(p, function(x){
+    x + guides(color = "none", fill = "none") + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+	
+do.call(cowplot::plot_grid, c(list(ncol = 3),p2))
+
+#motif footprinting
+motifPositions <- getPositions(projHeme5)
+
+#subset to a few genes of interest
+motifs <- c("GATA1", "CEBPA", "EBF1", "IRF4", "TBX21", "PAX5")
+markerMotifs <- unlist(lapply(motifs, function(x) grep(x, names(motifPositions), value = TRUE)))
+markerMotifs <- markerMotifs[markerMotifs %ni% "SREBF1_22"]
+markerMotifs
+
+if(is.null(projHeme5@projectMetadata$GroupCoverages$Clusters2)){
+  projHeme5 <- addGroupCoverages(ArchRProj = projHeme5, groupBy = "Clusters2")
+}
+
+#compute footprinting for subset of marker motifs
+seFoot <- getFootprints(
+  ArchRProj = projHeme5, 
+  positions = motifPositions[markerMotifs], 
+  groupBy = "Clusters2"
+)
+
+#plot normalize footprint by subtracting tn5 bias
+plotFootprints(
+  seFoot = seFoot,
+  ArchRProj = projHeme5, 
+  normMethod = "Subtract",
+  plotName = "Footprints-Subtract-Bias",
+  addDOC = FALSE,
+  smoothWindow = 5)															
+														
+#plot normalize footprint by dividing tn5 bias
+plotFootprints(
+  seFoot = seFoot,
+  ArchRProj = projHeme5, 
+  normMethod = "Divide",
+  plotName = "Footprints-Divide-Bias",
+  addDOC = FALSE,
+  smoothWindow = 5)															
+
+#plot no normalization footprint by dividing tn5 bias
+															
+plotFootprints(
+  seFoot = seFoot,
+  ArchRProj = projHeme5, 
+  normMethod = "None",
+  plotName = "Footprints-No-Normalization",
+  addDOC = FALSE,
+  smoothWindow = 5)
+
+#perform feature footprinting
+if(is.null(projHeme5@projectMetadata$GroupCoverages$Clusters2)){
+  projHeme5 <- addGroupCoverages(ArchRProj = projHeme5, groupBy = "Clusters2")}																														
+
+#create TSS insertion profiles without Tn5 bias normalization															
+seTSS <- getFootprints(
+  ArchRProj = projHeme5, 
+  positions = GRangesList(TSS = getTSS(projHeme5)), 
+  groupBy = "Clusters2",
+  flank = 2000)
+
+plotFootprints(
+  seFoot = seTSS,
+  ArchRProj = projHeme5, 
+  normMethod = "None",
+  plotName = "TSS-No-Normalization",
+  addDOC = FALSE,
+  flank = 2000,
+  flankNorm = 100)
 
 
 
@@ -913,5 +1155,4 @@ projHeme5 <- addArchRAnnotations(ArchRProj = projHeme5, collection = "EncodeTFBS
 
 
 
-
-  
+															
