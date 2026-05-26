@@ -1149,10 +1149,127 @@ plotFootprints(
   flank = 2000,
   flankNorm = 100)
 
+#Co-accessibility analysis, this take a while
+projHeme5 <- addCoAccessibility(
+    ArchRProj = projHeme5,
+    reducedDims = "IterativeLSI")
+							  
+#retrieve this co-accessibility information from the ArchRProject returning a dataframe
+cA <- getCoAccessibility(
+    ArchRProj = projHeme5,
+    corCutOff = 0.5,
+    resolution = 1,
+    returnLoops = FALSE)
+cA
+#DataFrame with 96524 rows and 11 columns
+
+#if returnLoops = TRUE, returns co-accessibility information in the form a loop track, use to plot on browser track
+#filter based on FDR and varquantile							  
+cALoops <- cA[[1]]
+cALoops <- cALoops[cALoops$FDR < 10^-10]
+cALoops <- cALoops[rowMins(cbind(cALoops$VarQuantile1,cALoops$VarQuantile2)) > 0.35]
+cALoops				
+
+#increase resolution to 1000 bp, 							  
+cA <- getCoAccessibility(
+    ArchRProj = projHeme5,
+    corCutOff = 0.5,
+    resolution = 1000,
+    returnLoops = TRUE)
+
+#plot browser tracks
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5, 
+    groupBy = "Clusters2", 
+    geneSymbol = markerGenes, 
+    upstream = 50000,
+    downstream = 50000,
+    loops = getCoAccessibility(projHeme5))							  
+
+#plot and save plots
+grid::grid.newpage()
+grid::grid.draw(p$CD14)
+plotPDF(plotList = p, 
+    name = "Plot-Tracks-Marker-Genes-with-CoAccessibility.pdf", 
+    ArchRProj = projHeme5, 
+    addDOC = FALSE, width = 5, height = 5)
+
+#gene correlations peak-to-gene links analysis
+projHeme5 <- addPeak2GeneLinks(
+    ArchRProj = projHeme5,
+    reducedDims = "IterativeLSI")
+
+#retrieve these peak-to-gene links
+p2g <- getPeak2GeneLinks(
+    ArchRProj = projHeme5,
+    corCutOff = 0.45,
+    resolution = 1,
+    returnLoops = FALSE)
+
+#add gene name and peak coordinate to df							  
+p2g$geneName <- mcols(metadata(p2g)$geneSet)$name[p2g$idxRNA]
+p2g$peakName <- (metadata(p2g)$peakSet %>% {paste0(seqnames(.), "_", start(.), "_", end(.))})[p2g$idxATAC]
+p2g							  
+
+#set return loops to TRUE this time and decrease resolution
+p2g <- getPeak2GeneLinks(
+    ArchRProj = projHeme5,
+    corCutOff = 0.45,
+    resolution = 1000,
+    returnLoops = TRUE)
+
+#decrease resolution even further							  
+p2g <- getPeak2GeneLinks(
+    ArchRProj = projHeme5,
+    corCutOff = 0.45,
+    resolution = 10000,
+    returnLoops = TRUE)
+
+#plot browser tracks							  
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5, 
+    groupBy = "Clusters2", 
+    geneSymbol = markerGenes, 
+    upstream = 50000,
+    downstream = 50000,
+    loops = getPeak2GeneLinks(projHeme5))
+
+#save plot							  
+grid::grid.newpage()
+grid::grid.draw(p$CD14)
+plotPDF(plotList = p, 
+    name = "Plot-Tracks-Marker-Genes-with-Peak2GeneLinks.pdf", 
+    ArchRProj = projHeme5, 
+    addDOC = FALSE, width = 5, height = 5)
+
+#plot heatmap and save							  
+p <- plotPeak2GeneHeatmap(ArchRProj = projHeme5, groupBy = "Clusters2")							  
+plotPDF(p, name="Plot-heatmap-peak2gene-heatmap", addDOC=F)
+
+#Identification of Positive TF-Regulators
+#identiy deviant TFs first							  
+seGroupMotif <- getGroupSE(ArchRProj = projHeme5, useMatrix = "MotifMatrix", groupBy = "Clusters2")
+
+#subset to deviation z scores
+seZ <- seGroupMotif[rowData(seGroupMotif)$seqnames=="z",]
+
+#find max delta z scores between all clusters							  
+rowData(seZ)$maxDelta <- lapply(seq_len(ncol(seZ)), function(x){
+  rowMaxs(assay(seZ) - assay(seZ)[,x])
+}) %>% Reduce("cbind", .) %>% rowMaxs
+
+#Step 2. Identify Correlated TF Motifs and TF Gene Score/Expression, make sure to set AddArchRThreads to 1, else a parallelization error occurs
+corGSM_MM <- correlateMatrices(
+    ArchRProj = projHeme5,
+    useMatrix1 = "GeneScoreMatrix",
+    useMatrix2 = "MotifMatrix",
+    reducedDims = "IterativeLSI")
 
 
 
 
 
 
-															
+
+
+							  
